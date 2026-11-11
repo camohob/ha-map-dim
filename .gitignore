@@ -5,6 +5,3 @@ desktop.ini
 
 # локальное окружение сессии
 .cortexkit/
-
-# workflow добавим позже (нужен scope workflow у gh токена)
-.github/
