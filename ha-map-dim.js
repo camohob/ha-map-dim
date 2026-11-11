@@ -120,8 +120,20 @@
     map._drawPaths();
     const hass = card.hass ?? document.querySelector('home-assistant')?.hass;
     const ids = (card._configEntities ?? []).map(e => e.entity);
+    // плотная GPS-история в recorder есть только у трекеров-источников;
+    // у person.* хранятся лишь смены состояния (зон) — трек из стрима в БД не пишется.
+    // узнаём источник каждого человека и запрашиваем историю и его трекера тоже
+    const sourceOf = {};
+    try {
+      const pl = await hass.callWS({ type: 'person/list' });
+      for (const p of [...(pl?.storage ?? []), ...(pl?.config ?? [])]) {
+        const eid = p.entity_id ?? 'person.' + p.id;
+        if (p.device_trackers?.length) sourceOf[eid] = p.device_trackers;
+      }
+    } catch (e) { /* нет доступа к person/list — останется история зон */ }
+    const allIds = [...new Set([...ids, ...Object.values(sourceOf).flat()])].filter(id => hass.states?.[id]);
     const raw = await hass.callApi('GET', 'history/period/' + start.toISOString() +
-      '?end_time=' + end.toISOString() + '&filter_entity_id=' + ids.join(','));
+      '?end_time=' + end.toISOString() + '&filter_entity_id=' + allIds.join(','));
     // REST-состояния → формат истории карточки {s, a, lu (секунды)}
     const synth = {};
     (raw ?? []).forEach(arr => {
@@ -132,6 +144,24 @@
         lu: new Date(st.last_updated).getTime() / 1000,
       }));
     });
+    // подмешать плотный трек трекера в историю человека (по времени, без дублей координат)
+    for (const eid of ids) {
+      const rows = synth[eid] ?? [];
+      const tr = (sourceOf[eid] ?? []).flatMap(t => synth[t] ?? []);
+      if (!tr.length) continue;
+      const seen = [];
+      const merged = [...rows, ...tr]
+        .sort((x, y) => x.lu - y.lu)
+        .filter(r => {
+          const la = r.a?.latitude, lo = r.a?.longitude;
+          if (la == null || lo == null) return true;
+          const k = la.toFixed(5) + ',' + lo.toFixed(5);
+          if (seen[seen.length - 1] === k) return false;
+          seen.push(k);
+          return true;
+        });
+      synth[eid] = merged;
+    }
     // родной конвертер карточки: состояния → пути (имена, цвета, точки)
     const paths = card._getHistoryPaths(
       card._config, synth, card._entityReg, card._themes, card._formatters?.formatEntityName,
