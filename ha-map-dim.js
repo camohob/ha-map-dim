@@ -285,8 +285,26 @@
       if (live) { loadHistory(null, null).catch(e => console.error('ha-map-dim history:', e)); return; }
       runRange(f, t);
     };
-    from.onchange = () => { if (from.value) { sel.value = 'now'; runRange(from.value, to.value); } };
-    to.onchange = () => { if (from.value || to.value) { sel.value = 'now'; runRange(from.value || to.value, to.value); } };
+    // период не больше недели: при выборе «с» второй край должен попадать
+    // в [с … с+6], при выборе «по» — в [по-6 … по]; иначе сворачивается к выбранному
+    const DAY = 86400000;
+    const clampPeriod = (anchor, other, dir) => {
+      if (!anchor.value || !other.value) return;
+      const a = dayStart(anchor.value).getTime(), o = dayStart(other.value).getTime();
+      if (dir > 0 ? (o < a || o - a > 6 * DAY) : (o > a || a - o > 6 * DAY)) other.value = anchor.value;
+    };
+    from.onchange = () => {
+      if (!from.value) return;
+      sel.value = 'now';
+      clampPeriod(from, to, +1);
+      runRange(from.value, to.value);
+    };
+    to.onchange = () => {
+      if (!from.value && !to.value) return;
+      sel.value = 'now';
+      clampPeriod(to, from, -1);
+      runRange(from.value || to.value, to.value);
+    };
     return form;
   }
 
